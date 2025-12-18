@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AksesBaca - Penerjemah & Pembaca Dokumen Inklusif</title>
+    
+    <!-- Tailwind CSS untuk Styling Cepat -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome untuk Ikon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Libraries untuk Pemrosesan Dokumen (CDN) -->
+    <!-- Tesseract.js untuk OCR -->
+    <script src="https://unpkg.com/tesseract.js@v4.0.1/dist/tesseract.min.js"></script>
+    <!-- Mammoth.js untuk DOCX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- PDF.js untuk PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+
+    <!-- Marked.js untuk merender Markdown dari Gemini -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        /* Base Accessibility Styles */
+        :root {
+            --bg-color: #f3f4f6;
+            --text-color: #1f2937;
+            --primary-color: #2563eb;
+            --component-bg: #ffffff;
+            --border-color: #e5e7eb;
+        }
+
+        /* High Contrast Mode (Yellow on Black) */
+        body.high-contrast {
+            --bg-color: #000000;
+            --text-color: #ffff00;
+            --primary-color: #ffff00;
+            --component-bg: #000000;
+            --border-color: #ffff00;
+        }
+
+        /* Dark Mode */
+        body.dark-mode {
+            --bg-color: #111827;
+            --text-color: #f9fafb;
+            --primary-color: #60a5fa;
+            --component-bg: #1f2937;
+            --border-color: #374151;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .card {
+            background-color: var(--component-bg);
+            border: 2px solid var(--border-color);
+        }
+
+        /* Focus styles for keyboard navigation */
+        *:focus-visible {
+            outline: 4px solid #ff00ff;
+            outline-offset: 2px;
+        }
+
+        /* Large buttons for accessibility */
+        .btn-access {
+            padding: 1rem 1.5rem;
+            font-weight: bold;
+            border-radius: 0.5rem;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .high-contrast .btn-access {
+            border: 2px solid #ffff00;
+            background: #000;
+            color: #ffff00;
+        }
+
+        /* Hide Scrollbar but allow scrolling */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .modal.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        /* Markdown Styles within Results */
+        .prose h1, .prose h2, .prose h3 { font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .prose p { margin-bottom: 0.8em; }
+        .prose strong { font-weight: bold; }
+    </style>
+    
+    <script>
+        // Setup PDF.js Worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    </script>
+</head>
+<body class="min-h-screen flex flex-col text-base">
+
+    <!-- Skip Link for Screen Readers -->
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-blue-600 text-white p-4 z-50 rounded">
+        Lewati ke konten utama
+    </a>
+
+    <!-- Accessibility Toolbar -->
+    <header class="card sticky top-0 z-40 shadow-md p-4" aria-label="Alat Aksesibilitas">
+        <div class="container mx-auto flex flex-wrap justify-between items-center gap-4">
+            <h1 class="text-2xl font-bold flex items-center gap-2">
+                <i class="fas fa-universal-access"></i> AksesBaca
+            </h1>
+            
+            <div class="flex flex-wrap gap-2 items-center" role="group" aria-label="Pengaturan Tampilan">
+                <button onclick="toggleModal('settings-modal')" class="btn-access bg-purple-600 text-white mr-2" aria-label="Pengaturan API Gemini">
+                    <i class="fas fa-robot"></i> Setup AI
+                </button>
+
+                <button onclick="toggleTheme('light')" class="btn-access bg-gray-200 text-black" aria-label="Mode Terang">A</button>
+                <button onclick="toggleTheme('dark')" class="btn-access bg-gray-800 text-white" aria-label="Mode Gelap">A</button>
+                <button onclick="toggleTheme('contrast')" class="btn-access bg-black text-yellow-300 border-yellow-300" aria-label="Mode Kontras Tinggi">A</button>
+                
+                <button onclick="adjustFontSize(1)" class="btn-access bg-blue-100 text-blue-800" aria-label="Perbesar Teks"><i class="fas fa-plus"></i></button>
+                <button onclick="adjustFontSize(-1)" class="btn-access bg-blue-100 text-blue-800" aria-label="Perkecil Teks"><i class="fas fa-minus"></i></button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content" class="container mx-auto p-4 flex-grow space-y-8">
+        
+        <!-- Input Section -->
+        <section id="input-section" class="card rounded-xl p-6 shadow-sm" aria-labelledby="input-heading">
+            <h2 id="input-heading" class="text-xl font-bold mb-4 border-b pb-2 border-gray-300">1. Unggah Dokumen atau Teks</h2>
+            
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- File Upload -->
+                <div class="space-y-4">
+                    <label for="file-upload" class="block font-semibold mb-2">Pilih File (Gambar/PDF/DOCX)</label>
+                    <div class="relative border-4 border-dashed border-gray-300 hover:border-blue-500 rounded-xl p-8 text-center transition cursor-pointer bg-opacity-10 focus-within:ring-4 ring-blue-400" tabindex="0">
+                        <input type="file" id="file-upload" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/*,.pdf,.docx" onchange="handleFileSelect(event)" aria-label="Unggah file">
+                        <i class="fas fa-cloud-upload-alt text-4xl mb-2 opacity-50"></i>
+                        <p>Klik atau seret file ke sini</p>
+                    </div>
+                </div>
+
+                <!-- Manual Input -->
+                <div class="space-y-4">
+                    <label for="text-input" class="block font-semibold mb-2">Atau Ketik/Tempel Teks</label>
+                    <textarea id="text-input" rows="5" class="w-full p-4 rounded-lg border-2 border-gray-300 focus:border-blue-500 bg-transparent" placeholder="Masukkan teks di sini..."></textarea>
+                </div>
+            </div>
+
+            <!-- OCR Settings -->
+            <div class="mt-6 flex flex-wrap gap-4 items-end">
+                <div>
+                    <label for="ocr-lang" class="block font-semibold mb-1">Bahasa Dokumen Asli (OCR)</label>
+                    <select id="ocr-lang" class="p-3 rounded border-2 border-gray-300 bg-transparent min-w-[200px]">
+                        <option value="ind">Indonesia</option>
+                        <option value="eng">Inggris</option>
+                        <option value="jpn">Jepang (Japanese)</option>
+                        <option value="chi_sim">Mandarin (Simplified)</option>
+                        <option value="ara">Arab (Arabic)</option>
+                        <option value="jav">Jawa (Javanese)</option>
+                    </select>
+                </div>
+                
+                <button onclick="processDocument()" class="btn-access bg-blue-600 text-white hover:bg-blue-700 w-full md:w-auto">
+                    <i class="fas fa-cogs mr-2"></i> Proses Dokumen
+                </button>
+            </div>
+
+            <!-- Progress Bar (Hidden by default) -->
+            <div id="progress-container" class="hidden mt-4" aria-live="polite">
+                <p id="status-text" class="mb-1 font-semibold">Memproses...</p>
+                <div class="w-full bg-gray-200 rounded-full h-4">
+                    <div id="progress-bar" class="bg-blue-600 h-4 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Result Section -->
+        <section id="result-section" class="card rounded-xl p-6 shadow-sm hidden" aria-labelledby="result-heading">
+            <h2 id="result-heading" class="text-xl font-bold mb-4 border-b pb-2 border-gray-300">2. Hasil & Alat Bantu AI</h2>
+
+            <div class="grid lg:grid-cols-2 gap-8">
+                <!-- Original / Extracted Text -->
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold text-lg">Teks Asli</h3>
+                        <button onclick="speakText('original-text', getSelectedLang('ocr-lang'))" class="btn-access text-sm bg-green-100 text-green-800">
+                            <i class="fas fa-volume-up"></i> Baca
+                        </button>
+                    </div>
+                    <div id="original-text" class="w-full h-64 overflow-y-auto p-4 border-2 border-gray-300 rounded whitespace-pre-wrap" tabindex="0" role="article"></div>
+                </div>
+
+                <!-- Translated / Simplified Text -->
+                <div class="space-y-2">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <h3 class="font-bold text-lg">
+                            <span id="output-label">Terjemahan / Hasil</span> ✨
+                        </h3>
+                        <div class="flex gap-2">
+                            <select id="target-lang" class="p-2 border rounded bg-transparent" aria-label="Bahasa Target">
+                                <option value="id">Indonesia</option>
+                                <option value="en">Inggris</option>
+                                <option value="jw">Jawa</option>
+                            </select>
+                            <button onclick="translateContent()" class="btn-access text-sm bg-blue-100 text-blue-800">
+                                <i class="fas fa-language"></i> Terjemahkan ✨
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Output area that handles HTML/Markdown from Gemini -->
+                    <div id="translated-text" class="w-full h-64 overflow-y-auto p-4 border-2 border-gray-300 rounded bg-opacity-5 prose max-w-none" tabindex="0" role="article">
+                        <em class="opacity-70">Hasil terjemahan atau analisis AI akan muncul di sini...</em>
+                    </div>
+                    <div class="flex gap-2 mt-2">
+                        <button onclick="speakText('translated-text', document.getElementById('target-lang').value)" class="btn-access bg-green-600 text-white flex-1">
+                            <i class="fas fa-volume-up mr-2"></i> Baca Hasil
+                        </button>
+                        <button onclick="simplifyText()" class="btn-access bg-purple-100 text-purple-800" aria-label="Sederhanakan Bahasa">
+                            <i class="fas fa-child"></i> Sederhanakan ✨
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Smart Features Area -->
+            <div class="mt-6 border-t pt-4 border-gray-300">
+                <h3 class="font-bold mb-2 flex items-center gap-2">
+                    Fitur Pemahaman Cerdas (Powered by AI) <i class="fas fa-sparkles text-yellow-500"></i>
+                </h3>
+                <div class="grid md:grid-cols-2 gap-4">
+                    <button onclick="summarizeText()" class="btn-access bg-orange-100 text-orange-900 text-left hover:bg-orange-200">
+                        <strong><i class="fas fa-list-alt"></i> Buat Ringkasan ✨</strong>
+                        <p class="text-sm">Dapatkan poin-poin penting dari dokumen ini.</p>
+                    </button>
+                    <button onclick="explainTerms()" class="btn-access bg-teal-100 text-teal-900 text-left hover:bg-teal-200">
+                        <strong><i class="fas fa-question-circle"></i> Jelaskan Istilah Sulit ✨</strong>
+                        <p class="text-sm">Buat glosarium definisi kata-kata sulit.</p>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- History Section -->
+        <section class="card rounded-xl p-6 shadow-sm" aria-labelledby="history-heading">
+            <div class="flex justify-between items-center mb-4 border-b pb-2 border-gray-300">
+                <h2 id="history-heading" class="text-xl font-bold">Riwayat Lokal</h2>
+                <button onclick="clearHistory()" class="text-red-500 hover:text-red-700 font-bold text-sm">Hapus Semua</button>
+            </div>
+            <ul id="history-list" class="space-y-2">
+                <!-- History items will be injected here -->
+                <li class="opacity-50">Belum ada riwayat dokumen.</li>
+            </ul>
+        </section>
+
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="card p-6 rounded-xl max-w-md w-full m-4 shadow-2xl relative">
+            <button onclick="toggleModal('settings-modal')" class="absolute top-4 right-4 text-2xl font-bold">&times;</button>
+            
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                <i class="fas fa-robot"></i> Pengaturan AI
+            </h2>
+            
+            <div class="space-y-4">
+                <p class="text-sm opacity-80">
+                    Masukkan API Key Google Gemini Anda untuk mengaktifkan fitur cerdas (Ringkasan, Penjelas, Terjemahan Akurat).
+                </p>
+                <p class="text-xs bg-yellow-100 text-yellow-800 p-2 rounded">
+                    <strong>Privasi:</strong> Kunci API disimpan secara lokal di browser Anda.
+                </p>
+                
+                <div>
+                    <label for="gemini-key" class="block font-bold mb-1">Gemini API Key</label>
+                    <input type="password" id="gemini-key" class="w-full p-3 border-2 border-gray-300 rounded text-black" placeholder="Paste API Key here...">
+                </div>
+                
+                <div class="flex justify-end gap-2 pt-2">
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-600 underline text-sm flex items-center mr-auto">Dapatkan Key Gratis</a>
+                    <button onclick="saveApiKey()" class="btn-access bg-green-600 text-white">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="p-6 text-center text-sm opacity-70">
+        <p>Platform Aksesibilitas Web Statis &bull; Berjalan di Browser &bull; GitHub Pages &bull; Powered by Alwan Farhan</p>
+    </footer>
+
+    <!-- LOGIC SCRIPT -->
+    <script>
+        // --- 0. GEMINI API CONFIGURATION ---
+        const ENV_API_KEY = ""; // Environment provided key (empty for static files)
+        
+        function getApiKey() {
+            // Priority: LocalStorage (User set) -> Env Var (Canvas context)
+            return localStorage.getItem('gemini_api_key') || ENV_API_KEY;
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('gemini-key').value.trim();
+            if (key) {
+                localStorage.setItem('gemini_api_key', key);
+                alert("API Key berhasil disimpan!");
+                toggleModal('settings-modal');
+            } else {
+                alert("Mohon masukkan API Key.");
+            }
+        }
+
+        function toggleModal(id) {
+            document.getElementById(id).classList.toggle('active');
+            // Load existing key if opening
+            if(document.getElementById(id).classList.contains('active')) {
+                document.getElementById('gemini-key').value = localStorage.getItem('gemini_api_key') || '';
+            }
+        }
+
+        async function callGemini(prompt, sourceText) {
+            const apiKey = getApiKey();
+            const resultBox = document.getElementById('translated-text');
+            
+            if (!apiKey) {
+                toggleModal('settings-modal');
+                throw new Error("API Key diperlukan. Silakan masukkan di pengaturan.");
+            }
+
+            resultBox.innerHTML = '<div class="animate-pulse flex space-x-4"><div class="flex-1 space-y-4 py-1"><div class="h-4 bg-gray-400 rounded w-3/4"></div><div class="space-y-2"><div class="h-4 bg-gray-400 rounded"></div><div class="h-4 bg-gray-400 rounded w-5/6"></div></div></div></div><p class="mt-2 text-sm">Gemini sedang berpikir...</p>';
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                
+                const payload = {
+                    contents: [{
+                        parts: [{
+                            text: `${prompt}\n\nTeks Sumber:\n${sourceText}`
+                        }]
+                    }]
+                };
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error("Gagal menghubungi Gemini API.");
+
+                const data = await response.json();
+                const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (!generatedText) throw new Error("Tidak ada respons teks dari AI.");
+                
+                return generatedText;
+
+            } catch (error) {
+                console.error(error);
+                resultBox.innerHTML = `<p class="text-red-600 font-bold">Error: ${error.message}</p>`;
+                return null;
+            }
+        }
+
+        // --- 1. ACCESSIBILITY SETTINGS ---
+        let currentFontSize = 100;
+
+        function toggleTheme(mode) {
+            document.body.classList.remove('dark-mode', 'high-contrast');
+            if (mode === 'dark') document.body.classList.add('dark-mode');
+            if (mode === 'contrast') document.body.classList.add('high-contrast');
+            saveSettings();
+        }
+
+        function adjustFontSize(direction) {
+            currentFontSize += (direction * 10);
+            if (currentFontSize < 100) currentFontSize = 100;
+            if (currentFontSize > 400) currentFontSize = 400;
+            
+            document.documentElement.style.fontSize = `${(currentFontSize / 100) * 16}px`;
+            // Adjust container width for very large text
+            if(currentFontSize > 200) {
+                document.querySelector('.container').classList.remove('mx-auto');
+                document.querySelector('.container').classList.add('px-2');
+            } else {
+                document.querySelector('.container').classList.add('mx-auto');
+            }
+        }
+
+        function saveSettings() {
+            // LocalStorage implementation for preferences
+            const settings = {
+                theme: document.body.classList.contains('dark-mode') ? 'dark' : 
+                       document.body.classList.contains('high-contrast') ? 'contrast' : 'light'
+            };
+            localStorage.setItem('accessSettings', JSON.stringify(settings));
+        }
+
+        // --- 2. FILE PROCESSING (OCR & PARSING) ---
+        
+        async function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            document.getElementById('text-input').value = `[File dipilih: ${file.name}]`;
+        }
+
+        async function processDocument() {
+            const fileInput = document.getElementById('file-upload');
+            const textInput = document.getElementById('text-input');
+            const lang = document.getElementById('ocr-lang').value;
+            
+            showProgress(true);
+            let extractedText = "";
+
+            try {
+                if (fileInput.files.length > 0) {
+                    const file = fileInput.files[0];
+                    updateStatus("Menganalisis jenis file...");
+
+                    if (file.type.includes('image')) {
+                        updateStatus("Menjalankan OCR pada gambar...");
+                        extractedText = await performOCR(file, lang);
+                    } else if (file.type.includes('pdf')) {
+                        updateStatus("Mengekstrak teks dari PDF...");
+                        extractedText = await extractPDF(file);
+                    } else if (file.name.endsWith('.docx')) {
+                        updateStatus("Mengekstrak teks dari DOCX...");
+                        extractedText = await extractDOCX(file);
+                    } else {
+                        throw new Error("Format file tidak didukung.");
+                    }
+                } else if (textInput.value.trim() !== "") {
+                    if(!textInput.value.includes("[File dipilih")) {
+                        extractedText = textInput.value;
+                    } else {
+                        throw new Error("Silakan pilih file atau ketik teks manual.");
+                    }
+                } else {
+                    throw new Error("Tidak ada masukan ditemukan.");
+                }
+
+                displayResult(extractedText);
+                addToHistory(extractedText.substring(0, 50) + "...");
+                
+            } catch (error) {
+                alert("Error: " + error.message);
+                updateStatus("Gagal: " + error.message);
+            } finally {
+                showProgress(false);
+            }
+        }
+
+        // Tesseract.js Implementation
+        async function performOCR(imageFile, lang) {
+            const worker = await Tesseract.createWorker({
+                logger: m => {
+                    if(m.status === 'recognizing text') {
+                        updateProgress(m.progress * 100);
+                    }
+                }
+            });
+            await worker.loadLanguage(lang);
+            await worker.initialize(lang);
+            const { data: { text } } = await worker.recognize(imageFile);
+            await worker.terminate();
+            return text;
+        }
+
+        // PDF.js Implementation
+        async function extractPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                updateProgress((i / pdf.numPages) * 100);
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + "\n\n";
+            }
+            return fullText;
+        }
+
+        // Mammoth.js Implementation for DOCX
+        async function extractDOCX(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            updateProgress(100);
+            return result.value;
+        }
+
+        // --- 3. SMART FEATURES (Gemini API Integration) ---
+
+        async function translateContent() {
+            const sourceText = document.getElementById('original-text').innerText;
+            if (!sourceText) return;
+            const targetLang = document.getElementById('target-lang').value;
+            const langName = targetLang === 'id' ? 'Indonesia' : targetLang === 'en' ? 'Inggris' : 'Jawa';
+            
+            document.getElementById('output-label').innerText = "Terjemahan AI";
+
+            // Try Gemini First
+            if (getApiKey()) {
+                const prompt = `Bertindaklah sebagai penerjemah profesional. Terjemahkan teks berikut ke dalam bahasa ${langName}. Pastikan terjemahan akurat, alami, dan mudah dibaca. Jangan sertakan penjelasan tambahan, hanya hasil terjemahan.`;
+                const result = await callGemini(prompt, sourceText);
+                if (result) document.getElementById('translated-text').innerHTML = marked.parse(result);
+            } else {
+                // Fallback to legacy method if no key
+                fallbackTranslate(sourceText, targetLang);
+            }
+        }
+
+        async function simplifyText() {
+            const sourceText = document.getElementById('original-text').innerText;
+            if (!sourceText) return;
+            const targetLang = document.getElementById('target-lang').value;
+            const langName = targetLang === 'id' ? 'Indonesia' : targetLang === 'en' ? 'Inggris' : 'Jawa';
+            
+            document.getElementById('output-label').innerText = "Versi Sederhana";
+
+            if (getApiKey()) {
+                const prompt = `Tulis ulang teks berikut agar lebih mudah dipahami oleh anak usia 10 tahun atau orang awam. Gunakan kalimat pendek, hindari jargon, dan gunakan bahasa ${langName}. Format dengan paragraf yang jelas.`;
+                const result = await callGemini(prompt, sourceText);
+                if (result) document.getElementById('translated-text').innerHTML = marked.parse(result);
+            } else {
+                alert("Fitur ini membutuhkan API Key Gemini. Silakan setup di menu atas.");
+                toggleModal('settings-modal');
+            }
+        }
+
+        async function summarizeText() {
+            const sourceText = document.getElementById('original-text').innerText;
+            if (!sourceText) return;
+            const targetLang = document.getElementById('target-lang').value;
+            const langName = targetLang === 'id' ? 'Indonesia' : targetLang === 'en' ? 'Inggris' : 'Jawa';
+
+            document.getElementById('output-label').innerText = "Ringkasan Dokumen";
+
+            if (getApiKey()) {
+                const prompt = `Buatlah ringkasan eksekutif dari teks berikut dalam bahasa ${langName}. Gunakan format bullet points untuk poin-poin utama agar mudah dibaca sekilas.`;
+                const result = await callGemini(prompt, sourceText);
+                if (result) document.getElementById('translated-text').innerHTML = marked.parse(result);
+            } else {
+                alert("Fitur ini membutuhkan API Key Gemini. Silakan setup di menu atas.");
+                toggleModal('settings-modal');
+            }
+        }
+        
+        async function explainTerms() {
+            const sourceText = document.getElementById('original-text').innerText;
+            if (!sourceText) return;
+            const targetLang = document.getElementById('target-lang').value;
+            const langName = targetLang === 'id' ? 'Indonesia' : targetLang === 'en' ? 'Inggris' : 'Jawa';
+
+            document.getElementById('output-label').innerText = "Glosarium Istilah";
+
+            if (getApiKey()) {
+                const prompt = `Identifikasi istilah-istilah sulit, teknis, asing, atau singkatan dalam teks berikut. Buatlah daftar istilah tersebut beserta penjelasan singkat dan mudah dipahami dalam bahasa ${langName}. Format sebagai daftar definisi HTML.`;
+                const result = await callGemini(prompt, sourceText);
+                if (result) document.getElementById('translated-text').innerHTML = marked.parse(result);
+            } else {
+                alert("Fitur ini membutuhkan API Key Gemini. Silakan setup di menu atas.");
+                toggleModal('settings-modal');
+            }
+        }
+
+        // Legacy Fallback (keeping for robustness)
+        async function fallbackTranslate(sourceText, targetLang) {
+            const resultBox = document.getElementById('translated-text');
+            resultBox.innerHTML = "<em>Menerjemahkan (Mode Fallback Public API)...</em>";
+            try {
+                const langPair = targetLang === 'id' ? 'en|id' : 'id|en';
+                const apiUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(sourceText.substring(0, 500))}&langpair=${langPair}`;
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+                if(data.responseStatus === 200) {
+                    resultBox.innerText = data.responseData.translatedText + "\n\n(Catatan: Mode Fallback terbatas 500 karakter. Gunakan Gemini API untuk hasil penuh)";
+                } else { throw new Error("Limit API tercapai."); }
+            } catch (e) {
+                resultBox.innerText = "Gagal menerjemahkan. Harap masukkan API Key Gemini untuk hasil terbaik.";
+            }
+        }
+
+        // --- 4. TEXT TO SPEECH (Web Speech API) ---
+
+        function speakText(elementId, langCode) {
+            window.speechSynthesis.cancel();
+            const element = document.getElementById(elementId);
+            const text = element.innerText; // Read innerText to ignore HTML tags
+            
+            if (!text) return;
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            const langMap = { 'id': 'id-ID', 'ind': 'id-ID', 'en': 'en-US', 'eng': 'en-US', 'jpn': 'ja-JP', 'jw': 'id-ID' }; // Fallback Javanese to Indo voice usually
+            
+            utterance.lang = langMap[langCode] || 'id-ID';
+            utterance.rate = 0.9; 
+            utterance.pitch = 1;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function getSelectedLang(selectId) {
+            return document.getElementById(selectId).value;
+        }
+
+        // --- 5. UI UTILITIES ---
+
+        function showProgress(show) {
+            const el = document.getElementById('progress-container');
+            if (show) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('status-text').innerText = msg;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progress-bar').style.width = `${percent}%`;
+        }
+
+        function displayResult(text) {
+            document.getElementById('result-section').classList.remove('hidden');
+            document.getElementById('original-text').innerText = text;
+            document.getElementById('result-heading').focus();
+            document.getElementById('result-section').scrollIntoView({behavior: 'smooth'});
+        }
+
+        // --- 6. LOCAL HISTORY (LocalStorage) ---
+
+        function addToHistory(snippet) {
+            let history = JSON.parse(localStorage.getItem('docHistory') || '[]');
+            const timestamp = new Date().toLocaleString();
+            history.unshift({ time: timestamp, text: snippet });
+            if (history.length > 5) history.pop();
+            localStorage.setItem('docHistory', JSON.stringify(history));
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('history-list');
+            const history = JSON.parse(localStorage.getItem('docHistory') || '[]');
+            if (history.length === 0) {
+                list.innerHTML = '<li class="opacity-50">Belum ada riwayat.</li>';
+                return;
+            }
+            list.innerHTML = history.map(item => `
+                <li class="bg-gray-100 dark:bg-gray-700 p-3 rounded border border-gray-300 dark:border-gray-600">
+                    <div class="text-xs font-bold opacity-70">${item.time}</div>
+                    <div class="truncate">${item.text}</div>
+                </li>
+            `).join('');
+        }
+
+        function clearHistory() {
+            localStorage.removeItem('docHistory');
+            renderHistory();
+        }
+
+        // Initialize
+        window.onload = function() {
+            renderHistory();
+            const saved = JSON.parse(localStorage.getItem('accessSettings'));
+            if(saved && saved.theme) toggleTheme(saved.theme);
+        };
+    </script>
+</body>
+</html>
